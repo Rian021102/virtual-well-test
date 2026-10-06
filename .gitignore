@@ -1,0 +1,13 @@
+# Data
+data/welltest.csv
+
+# Generated outputs
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
