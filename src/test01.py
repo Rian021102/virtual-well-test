@@ -19,7 +19,7 @@ def create_train_test_split(data, column_to_drop=['GROSS_FLUID','OIL_RATE','WATE
     y = data[target_column]
     return train_test_split(X, y, test_size=test_size, random_state=random_state)
 
-def estimate_bhp(data, tvd_ft=6000.0, md_ft=None, tubing_id_in=2.992,
+def estimate_bhp(data, tvd_ft=5000.0, md_ft=None, tubing_id_in=2.992,
                  water_sg=1.05, water_visc_cp=0.6, roughness_in=0.0006):
     """
     Estimate flowing bottom hole pressure (psig) from wellhead data using the
