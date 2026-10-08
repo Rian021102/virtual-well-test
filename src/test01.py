@@ -23,8 +23,8 @@ def create_train_test_split(data, column_to_drop=['GROSS_FLUID','OIL_RATE','WATE
     y = data[target_column]
     return train_test_split(X, y, test_size=test_size, random_state=random_state)
 
-def choke_gilbert(data):
-    # Placeholder function for choke_gilbert calculation
+def bernoulli(data, column):
+    # Placeholder function for bernoulli calculation
     return data
 
 def adding_columns(data):
@@ -33,6 +33,8 @@ def adding_columns(data):
         data['WATER_CUT']=data['WATER_RATE']/data['GROSS_FLUID']
         data['GAS_LIQUID_RATIO'] = np.where(data['FM_GAS'] > 0, (data['FM_GAS']*1000) / data['GROSS_FLUID'], 0)
         data[['WATER_CUT', 'GAS_LIQUID_RATIO']] = data[['WATER_CUT', 'GAS_LIQUID_RATIO']].replace([np.inf, -np.inf], np.nan)
+    #if SEP_PRESS is not NaN then calculate the difference between WH_PRESS and SEP_PRESS
+    # rows where SEP_PRESS (or WH_PRESS) is NaN stay NaN
     return data
 
 
@@ -109,22 +111,33 @@ def train_model(X_train,y_train,X_test,y_test):
         print(f"{name} - R^2 Score: {r2}")
         predictions[name] = y_pred
         r2_scores[name] = r2
-    #plot the r2 score for both random forest and xgboost
-    plt.figure(figsize=(8, 6))
-    plt.bar(list(r2_scores.keys()), list(r2_scores.values()))
-    plt.ylim(0, 1)
-    plt.title('R^2 Score')
+    #scatter plot of actual vs predicted for both random forest and xgboost, R^2 in the title
+    fig, axes = plt.subplots(1, len(models), figsize=(14, 6), sharex=True, sharey=True)
+    lims = [min(y_test.min(), min(p.min() for p in predictions.values())),
+            max(y_test.max(), max(p.max() for p in predictions.values()))]
+    for ax, name in zip(axes, models):
+        ax.scatter(y_test, predictions[name], alpha=0.5, s=15)
+        ax.plot(lims, lims, 'r--', label='Perfect prediction')
+        ax.set_xlabel('Actual GROSS_FLUID')
+        ax.set_ylabel('Predicted GROSS_FLUID')
+        ax.set_title(f'{name} (R^2 = {r2_scores[name]:.3f})')
+        ax.legend()
+    plt.tight_layout()
     plt.savefig("/home/rianr/pypro/myvenv/virtual-well-test/Images/r2_score.png")
     plt.close()
-    #plot feature of importance for the random forest regressor and xgboost regressor
+    #plot feature of importance as horizontal bars for the random forest regressor and xgboost regressor
     rf_importances = models['Random Forest'].feature_importances_
     xgb_importances = models['XGBoost'].feature_importances_
     feature_names = X_train.columns
+    y_pos = np.arange(len(feature_names))
+    height = 0.4
 
-    plt.figure(figsize=(12, 6))
-    plt.bar(feature_names, rf_importances, alpha=0.6, label='Random Forest')
-    plt.bar(feature_names, xgb_importances, alpha=0.6, label='XGBoost')
-    plt.xticks(rotation=90)
+    plt.figure(figsize=(10, 6))
+    plt.barh(y_pos - height/2, rf_importances, height, label='Random Forest')
+    plt.barh(y_pos + height/2, xgb_importances, height, label='XGBoost')
+    plt.yticks(y_pos, feature_names)
+    plt.gca().invert_yaxis()
+    plt.xlabel('Importance')
     plt.title('Feature Importances')
     plt.legend()
     plt.tight_layout()
@@ -161,10 +174,11 @@ def main(file_path):
     X_test = test_data.drop(columns=['GROSS_FLUID'])
     y_test = test_data['GROSS_FLUID']
     # models can't use datetime columns, drop TEST_DATE from the features
-    # WATER_CUT and GAS_LIQUID_RATIO are computed from GROSS_FLUID (the target), drop them to avoid leakage
-    leak_cols = ['TEST_DATE', 'WATER_CUT', 'GAS_LIQUID_RATIO']
-    X_train = X_train.drop(columns=leak_cols)
-    X_test = X_test.drop(columns=leak_cols)
+    #WATER_CUT and GAS_LIQUID_RATIO are computed from GROSS_FLUID (the target), drop them to avoid leakage
+    leak_cols = ['TEST_DATE', 'WATER_CUT', 'GAS_LIQUID_RATIO','FM_GAS']
+    to_drop = ['DURATION']
+    X_train = X_train.drop(columns=leak_cols + to_drop)
+    X_test = X_test.drop(columns=leak_cols + to_drop)
 
 
     predictions, models = train_model(X_train, y_train, X_test, y_test)
