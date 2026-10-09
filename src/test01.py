@@ -115,7 +115,7 @@ def analyze_data(data):
 
 def main(file_path):
     data = load_data(file_path)
-    data.to_csv("/home/rianr/pypro/myvenv/virtual-well-test/data/processed_data.csv", index=False)
+    data.to_csv("P:/project/pythonpro/myvenv/virtual-well-test/data/processed_data.csv", index=False)
     data = adding_columns(data)
     print(data.head())
     X_train, X_test, y_train, y_test = create_train_test_split(data)

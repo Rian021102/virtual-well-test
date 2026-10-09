@@ -21,7 +21,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor, HistGradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, r2_score
-import lightgbm as lgb, xgboost as xgb
+# import lightgbm as lgb, xgboost as xgb
 warnings.filterwarnings("ignore")
 OUT = "/home/rianr/pypro/myvenv/virtual-well-test/outputs"
 SEED = 42
@@ -113,8 +113,8 @@ def models():
         "RandomForest": make_pipeline(imp(), RandomForestRegressor(400, min_samples_leaf=3, max_features=0.5, n_jobs=-1, random_state=SEED)),
         "ExtraTrees": make_pipeline(imp(), ExtraTreesRegressor(500, min_samples_leaf=2, max_features=0.7, n_jobs=-1, random_state=SEED)),
         "HistGB": HistGradientBoostingRegressor(max_iter=600, learning_rate=0.04, max_leaf_nodes=31, l2_regularization=1.0, random_state=SEED),
-        "LightGBM": lgb.LGBMRegressor(n_estimators=800, learning_rate=0.03, num_leaves=31, subsample=0.8, subsample_freq=1,
-                                      colsample_bytree=0.8, min_child_samples=15, reg_lambda=1.0, verbose=-1, random_state=SEED),
+        # "LightGBM": lgb.LGBMRegressor(n_estimators=800, learning_rate=0.03, num_leaves=31, subsample=0.8, subsample_freq=1,
+        #                               colsample_bytree=0.8, min_child_samples=15, reg_lambda=1.0, verbose=-1, random_state=SEED),
         "XGBoost": xgb.XGBRegressor(n_estimators=800, learning_rate=0.03, max_depth=6, subsample=0.8, colsample_bytree=0.8,
                                     min_child_weight=3, reg_lambda=1.0, random_state=SEED),
     }
