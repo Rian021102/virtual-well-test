@@ -52,7 +52,7 @@ def analyze_data(data):
     print("Number of SURF_CHOKE greater than 128: ", (data['SURF_CHOKE'] > 128).sum())
     data[numeric_cols].hist(figsize=(15, 10))
     # check if the histogram image already exists next save would be the _1, _2, etc.
-    histogram_path = "/home/rianr/pypro/myvenv/virtual-well-test/Images/numeric_histograms.png"
+    histogram_path = "P:/project/pythonpro/myvenv/virtual-well-test/Images/numeric_histograms.png"
     if os.path.exists(histogram_path):
         base, ext = os.path.splitext(histogram_path)
         i = 1
@@ -71,7 +71,7 @@ def analyze_data(data):
     for i in range(len(corr.columns)):
         for j in range(len(corr.columns)):
             plt.text(j, i, f"{corr.iloc[i, j]:.2f}", ha='center', va='center', color='black')
-    corr_path = "/home/rianr/pypro/myvenv/virtual-well-test/Images/correlation_matrix.png"
+    corr_path = "P:/project/pythonpro/myvenv/virtual-well-test/Images/correlation_matrix.png"
     if os.path.exists(corr_path):
         base, ext = os.path.splitext(corr_path)
         i = 1
@@ -123,7 +123,7 @@ def train_model(X_train,y_train,X_test,y_test):
         ax.set_title(f'{name} (R^2 = {r2_scores[name]:.3f})')
         ax.legend()
     plt.tight_layout()
-    plt.savefig("/home/rianr/pypro/myvenv/virtual-well-test/Images/r2_score.png")
+    plt.savefig("P:/project/pythonpro/myvenv/virtual-well-test/Images/r2_score.png")
     plt.close()
     #plot feature of importance as horizontal bars for the random forest regressor and xgboost regressor
     rf_importances = models['Random Forest'].feature_importances_
@@ -141,7 +141,7 @@ def train_model(X_train,y_train,X_test,y_test):
     plt.title('Feature Importances')
     plt.legend()
     plt.tight_layout()
-    plt.savefig("/home/rianr/pypro/myvenv/virtual-well-test/Images/feature_importances.png")
+    plt.savefig("P:/project/pythonpro/myvenv/virtual-well-test/Images/feature_importances.png")
     plt.close()
 
     return predictions, models
@@ -150,15 +150,7 @@ def train_model(X_train,y_train,X_test,y_test):
 
 def main(file_path):
     data = load_data(file_path)
-<<<<<<< HEAD
-    data.to_csv("P:/project/pythonpro/myvenv/virtual-well-test/data/processed_data.csv", index=False)
-=======
-    #making all columns when printed
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.width', None)
-    pd.set_option('display.max_rows', None)
-    data.to_csv("/home/rianr/pypro/myvenv/virtual-well-test/data/processed_data.csv", index=False)
->>>>>>> db768885fe028e0a992916fdbc487f00e9997db8
+    data.to_csv("P:/project/pythonpro/myvenv/virtual-well-test/data/welltest.csv", index=False)
     data = adding_columns(data)
     print(data.head())
     X_train, X_test, y_train, y_test = create_train_test_split(data)
@@ -190,4 +182,4 @@ def main(file_path):
 
 
 if __name__ == "__main__":
-    main("/home/rianr/pypro/myvenv/virtual-well-test/data/welltest.csv")
+    main("P:/project/pythonpro/myvenv/virtual-well-test/data/welltest.csv")
