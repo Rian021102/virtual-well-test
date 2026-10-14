@@ -34,10 +34,16 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.optimize import least_squares
 from sklearn.impute import SimpleImputer
+<<<<<<< HEAD
+from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor, HistGradientBoostingRegressor
+from sklearn.metrics import mean_absolute_error, r2_score
+# import lightgbm as lgb, xgboost as xgb
+=======
 from sklearn.pipeline import make_pipeline
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.model_selection import GroupKFold
 import lightgbm as lgb
+>>>>>>> db768885fe028e0a992916fdbc487f00e9997db8
 warnings.filterwarnings("ignore")
 
 DATA = "/mnt/user-data/uploads/processed_data.csv"
@@ -127,6 +133,20 @@ def pair_features(T: pd.DataFrame, A: pd.DataFrame) -> pd.DataFrame:
     F["CHOKE_CHANGED"] = (np.abs(F.D_SURF_CHOKE) > 0).astype(float)
     return F.replace([np.inf, -np.inf], np.nan)
 
+<<<<<<< HEAD
+# ---------------------------------------------------------------- 4. models
+def models():
+    imp = lambda: SimpleImputer(strategy="median")
+    return {
+        "Ridge (log)": make_pipeline(imp(), StandardScaler(), RidgeCV(alphas=np.logspace(-2, 3, 20))),
+        "RandomForest": make_pipeline(imp(), RandomForestRegressor(400, min_samples_leaf=3, max_features=0.5, n_jobs=-1, random_state=SEED)),
+        "ExtraTrees": make_pipeline(imp(), ExtraTreesRegressor(500, min_samples_leaf=2, max_features=0.7, n_jobs=-1, random_state=SEED)),
+        "HistGB": HistGradientBoostingRegressor(max_iter=600, learning_rate=0.04, max_leaf_nodes=31, l2_regularization=1.0, random_state=SEED),
+        # "LightGBM": lgb.LGBMRegressor(n_estimators=800, learning_rate=0.03, num_leaves=31, subsample=0.8, subsample_freq=1,
+        #                               colsample_bytree=0.8, min_child_samples=15, reg_lambda=1.0, verbose=-1, random_state=SEED),
+        "XGBoost": xgb.XGBRegressor(n_estimators=800, learning_rate=0.03, max_depth=6, subsample=0.8, colsample_bytree=0.8,
+                                    min_child_weight=3, reg_lambda=1.0, random_state=SEED),
+=======
 
 def build_pairs(df: pd.DataFrame, is_test: np.ndarray) -> pd.DataFrame:
     """Pair every test with up to N earlier tests on the same well (simulated portable-unit visits).
@@ -257,6 +277,7 @@ def main():
         "ExtraTrees residual": et.predict(F),
         "LightGBM residual": lg.predict(F),
         "Hybrid": hyb.predict(F),
+>>>>>>> db768885fe028e0a992916fdbc487f00e9997db8
     }
 
     # --- accuracy vs days since last portable-unit visit
