@@ -3,8 +3,6 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 #import random forest
 from sklearn.ensemble import RandomForestRegressor
-#import simpleimputer
-from sklearn.impute import SimpleImputer
 #import mean_squared_error, r2_score
 from sklearn.metrics import mean_squared_error, r2_score
 #import pickle to save the model
@@ -26,6 +24,8 @@ def load_data(file_path):
         data=pd.read_csv(file_path)
     elif file_path.endswith('.xlsx'):
         data=pd.read_excel(file_path)
+    else:
+        raise ValueError(f"Unsupported file type: {file_path}. Use .csv or .xlsx")
     
     cols=['WH_CSG_PRESS','WH_PRESS','WH_TEMP','GRAVITY','GROSS_FLUID',
           'SURF_CHOKE','SEP_PRESS']
@@ -42,9 +42,8 @@ def data_cleaning(data):
     data=data[data['WH_PRESS']<=3500]
     data=data[data['GROSS_FLUID']>=100]
     data=data[data['SURF_CHOKE']<=128]
-    #use simpleimputer to fill missing values with median
-    imputer = SimpleImputer(strategy='median')
-    data = pd.DataFrame(imputer.fit_transform(data), columns=data.columns)
+    #fill missing values with the median of each column
+    data = data.fillna(data.median()).reset_index(drop=True)
     return data
 
 def train_model(X_train, y_train,X_test, y_test):
