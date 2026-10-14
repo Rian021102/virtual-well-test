@@ -7,6 +7,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 #import mean_squared_error, r2_score
 from sklearn.metrics import mean_squared_error, r2_score
+#import pickle to save the model
+import joblib
 
 
 def load_data(file_path):
@@ -25,11 +27,11 @@ def load_data(file_path):
     elif file_path.endswith('.xlsx'):
         data=pd.read_excel(file_path)
     
-    cols=['WH_CSG_PRESS','WH_PRESS','WH_TEMP','GRAVITY','GROSS_LIQUID',
+    cols=['WH_CSG_PRESS','WH_PRESS','WH_TEMP','GRAVITY','GROSS_FLUID',
           'SURF_CHOKE','SEP_PRESS']
     data=data[cols]
-    X=data.drop('GROSS_LIQUID',axis=1)
-    y=data['GROSS_LIQUID']
+    X=data.drop('GROSS_FLUID',axis=1)
+    y=data['GROSS_FLUID']
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     return X_train, X_test, y_train, y_test
 
@@ -37,8 +39,8 @@ def data_cleaning(data):
     """
     Clean the data by filtering data based on specific conditions and filling missing values.
     """
-    data=data[data['WH_PRESS']]<=3500
-    data=data[data['GROSS_LIQUID']>=100]
+    data=data[data['WH_PRESS']<=3500]
+    data=data[data['GROSS_FLUID']>=100]
     data=data[data['SURF_CHOKE']<=128]
     #use simpleimputer to fill missing values with median
     imputer = SimpleImputer(strategy='median')
@@ -73,7 +75,27 @@ def train_model(X_train, y_train,X_test, y_test):
     
     print(f"Mean Squared Error: {mse}")
     print(f"R^2 Score: {r2}")
+    # Save the trained model to a file
+    # Use joblib to save the model
+    joblib.dump(rf_model, '/home/rianr/pypro/myvenv/virtual-well-test/model/rf_model.pkl')
     
     return rf_model
+
+def main():
+
+    file_path = '/home/rianr/pypro/myvenv/virtual-well-test/data/welltest.csv'
+    X_train, X_test, y_train, y_test = load_data(file_path)
+    train_data = pd.concat([X_train, y_train], axis=1)
+    test_data = pd.concat([X_test, y_test], axis=1)
+    train_data = data_cleaning(train_data)
+    test_data=test_data.dropna()
+    X_train = train_data.drop('GROSS_FLUID', axis=1)
+    y_train = train_data['GROSS_FLUID']
+    X_test = test_data.drop('GROSS_FLUID', axis=1)
+    y_test = test_data['GROSS_FLUID']
+    model = train_model(X_train, y_train,X_test, y_test)
+
+if __name__ == "__main__":
+    main()
 
 
