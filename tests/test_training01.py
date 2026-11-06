@@ -159,23 +159,6 @@ class TestDataCleaning(unittest.TestCase):
         self.assertTrue(training01.data_cleaning(df)['SEP_PRESS'].isna().any())
 
 
-class TestDualString(unittest.TestCase):
-
-    def frame(self, rows):
-        df = pd.DataFrame(rows, columns=['WELL_NAME', 'STRING_CODE', 'TEST_DATE'])
-        df['TEST_DATE'] = pd.to_datetime(df['TEST_DATE'])
-        return df
-
-    def test_drops_tests_while_other_string_active(self):
-        df = self.frame([
-            ['A', 'A_L', '2010-01-01'], ['A', 'A_S', '2010-02-01'],   # both active -> drop both
-            ['A', 'A_S', '2014-01-01'],                                # L inactive by then -> keep
-            ['B', 'B_S', '2010-01-01'],                                # single string -> keep
-        ])
-        kept = training01.remove_dual_string_tests(df)
-        self.assertEqual(list(kept.index), [2, 3])
-
-
 class TestSplit(unittest.TestCase):
 
     def test_time_split_holds_out_latest_tests_of_each_string(self):

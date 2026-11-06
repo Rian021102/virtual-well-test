@@ -12,7 +12,7 @@ Workflow:
        QG             gas rate = gas lift injection + formation gas (MSCFPD)
        WATER_CUT_FRAC water cut from the test (in deployment: from fluid sampling)
        QLIQ_EQ        mass-equivalent liquid rate = oil*SG_oil + water*1.0 (target)
-  2. Clean: only real WHT readings, valid ranges, remove dual-string and commingled tests.
+  2. Clean: only real WHT readings, valid ranges, remove commingled tests.
   3. Split 80:20 (default: random, as in the paper; 'time' holds out each string's latest 20%
      of tests as blind data) and evaluate.
   4. Combined regression: Random Forest sensitivity sweep on WH_TEMP + polynomial fit, so the
@@ -105,31 +105,13 @@ def add_derived_columns(data):
     return df
 
 
-def remove_dual_string_tests(data, window_days=90):
-    """Drop tests of a string while another string of the same well was producing.
-
-    Active strings of a dual-string well share the wellhead, so WHT of one is affected by the
-    other (paper: dual string). A string counts as active if it was tested within
-    `window_days` of the test.
-    """
-    keep = pd.Series(True, index=data.index)
-    for _, well in data.groupby('WELL_NAME'):
-        if well['STRING_CODE'].nunique() < 2:
-            continue
-        for idx, row in well.iterrows():
-            others = well[well['STRING_CODE'] != row['STRING_CODE']]
-            gap = (others['TEST_DATE'] - row['TEST_DATE']).abs().dt.days
-            if (gap <= window_days).any():
-                keep[idx] = False
-    return data[keep]
-
-
 def data_cleaning(data, exclude_strings=COMMINGLED_STRINGS):
     """Keep tests that follow the domain rules of the paper. Does not impute anything.
+    All wells are single string, so the paper's dual-string filter is not needed.
 
     - real wellhead temperature in °F within a plausible range (no median-filled WHT)
     - valid rates, pressure, choke, gravity and water cut
-    - no dual-string or commingled tests
+    - no commingled tests
     """
     df = data[
         (data['GROSS_FLUID'] >= 100)
@@ -141,7 +123,6 @@ def data_cleaning(data, exclude_strings=COMMINGLED_STRINGS):
         & data['TEST_DATE'].notna()
         & ~data['STRING_CODE'].isin(exclude_strings)
     ]
-    df = remove_dual_string_tests(df)
     return df.reset_index(drop=True)
 
 
