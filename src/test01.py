@@ -1,189 +1,204 @@
+"""
+Model selection and analysis for the liquid-rate model (IPTC-23662-MS workflow, no BHT).
+
+Uses the data preparation from training01.py so both scripts see exactly the same clean data,
+then:
+  - Spearman correlation of features vs target (paper figure 10)
+  - tunes and compares linear, polynomial, SVM, random forest, ANN and XGBoost (paper table 1)
+  - permutation feature importance of the selected model (paper figure 11)
+  - combined regression (model + polynomial on the WHT sweep) on the blind test (figures 12-13)
+  - leave-wells-out check: how the model does on wells it has never seen
+  - plots in Images/
+
+Nothing is saved to model/; train the production model with training01.py. When this script
+selects different Random Forest hyper-parameters, copy them into training01.RF_PARAMS.
+"""
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
+from sklearn.compose import TransformedTargetRegressor
 from sklearn.ensemble import RandomForestRegressor
-import xgboost as xgb
-from sklearn.metrics import mean_squared_error, r2_score
-import os
+from sklearn.impute import SimpleImputer
+from sklearn.inspection import permutation_importance
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.model_selection import GridSearchCV, GroupKFold, cross_val_score
+from sklearn.neural_network import MLPRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from sklearn.svm import SVR
 
-def load_data(file_path):
-  data=pd.read_csv(file_path)
-  cols=['TEST_DATE','DURATION','WH_CSG_PRESS','WH_PRESS',
-        'WH_TEMP','OIL_RATE','GRAVITY','WATER_RATE','FM_GAS',
-        'GROSS_FLUID','SURF_CHOKE','SEP_PRESS']
-  data = data[cols]
-  # convert TEST_DATE to datetime
-  data['TEST_DATE'] = pd.to_datetime(data['TEST_DATE'])
-  #save to a new CSV file
-  return data
+from training01 import (DATA_PATH, FEATURES, POLY_DEGREE, ROOT, SWEEP_FEATURE, TARGET,
+                        combined_predict, equivalent_factor, evaluate, prepare_data,
+                        sensitivity_curves, split_data, sweep_grid)
 
-def create_train_test_split(data, column_to_drop=['GROSS_FLUID','OIL_RATE','WATER_RATE'], target_column='GROSS_FLUID', test_size=0.2, random_state=42):
-    X = data.drop(columns=column_to_drop)
-    y = data[target_column]
-    return train_test_split(X, y, test_size=test_size, random_state=random_state)
+try:
+    import xgboost as xgb
+except ImportError:  # optional
+    xgb = None
 
-def bernoulli(data, column):
-    # Placeholder function for bernoulli calculation
-    return data
-
-def adding_columns(data):
-    if 'GROSS_FLUID' in data.columns and 'WATER_RATE' in data.columns:
-        # avoid division by zero: rows with GROSS_FLUID == 0 become NaN
-        data['WATER_CUT']=data['WATER_RATE']/data['GROSS_FLUID']
-        data['GAS_LIQUID_RATIO'] = np.where(data['FM_GAS'] > 0, (data['FM_GAS']*1000) / data['GROSS_FLUID'], 0)
-        data[['WATER_CUT', 'GAS_LIQUID_RATIO']] = data[['WATER_CUT', 'GAS_LIQUID_RATIO']].replace([np.inf, -np.inf], np.nan)
-    #if SEP_PRESS is not NaN then calculate the difference between WH_PRESS and SEP_PRESS
-    # rows where SEP_PRESS (or WH_PRESS) is NaN stay NaN
-    return data
+IMAGES_DIR = ROOT / 'Images'
 
 
-def analyze_data(data):
-    # checking data types
-    print(data.dtypes)
-    # checking for missing values
-    print(data.isnull().sum())
-    #check percentage of missing values
-    print((data.isnull().sum() / len(data)) * 100)
-    # plot histogram for each numeric column and images saved as png instead of showing
-    numeric_cols = data.select_dtypes(include=['float64', 'int64']).columns
-    print(data[numeric_cols].describe())
-    print("Number of WH pressure more than 3500 Psi: ", (data['WH_PRESS'] > 3500).sum())
-    print("Number of SURF_CHOKE greater than 128: ", (data['SURF_CHOKE'] > 128).sum())
-    data[numeric_cols].hist(figsize=(15, 10))
-    # check if the histogram image already exists next save would be the _1, _2, etc.
-    histogram_path = "/home/rianr/pypro/myvenv/virtual-well-test/Images/numeric_histograms.png"
-    if os.path.exists(histogram_path):
-        base, ext = os.path.splitext(histogram_path)
-        i = 1
-        while os.path.exists(f"{base}_{i}{ext}"):
-            i += 1
-        histogram_path = f"{base}_{i}{ext}"
-    plt.savefig(histogram_path)
-    plt.close()
-    #plot correlation matrix and also show the values on the matrix
-    corr = data[numeric_cols].corr()
-    plt.figure(figsize=(12, 8))
-    plt.matshow(corr, fignum=1)
-    plt.colorbar()
-    plt.xticks(range(len(corr.columns)), corr.columns, rotation=90)
-    plt.yticks(range(len(corr.columns)), corr.columns)
-    for i in range(len(corr.columns)):
-        for j in range(len(corr.columns)):
-            plt.text(j, i, f"{corr.iloc[i, j]:.2f}", ha='center', va='center', color='black')
-    corr_path = "/home/rianr/pypro/myvenv/virtual-well-test/Images/correlation_matrix.png"
-    if os.path.exists(corr_path):
-        base, ext = os.path.splitext(corr_path)
-        i = 1
-        while os.path.exists(f"{base}_{i}{ext}"):
-            i += 1
-        corr_path = f"{base}_{i}{ext}"
-    plt.savefig(corr_path)
-    plt.close()
+def spearman_correlation(data, features=FEATURES, target=TARGET):
+    return data[features + [target]].corr(method='spearman')
 
-def data_cleaning(data, medians=None):
-    #drop WH_PRESS values greater than 3500 Psi
-    data = data[data['WH_PRESS'] <= 3500]
-    # data=data[data['GAS_LIQUID_RATIO'] <= 1000]
-    data=data[data['GROSS_FLUID'] >=100]
-    data=data[data['SURF_CHOKE'] <= 128]
-    #impute missing values with median (pass the train medians when cleaning test data)
-    if medians is None:
-        medians = data.median()
-    data = data.fillna(medians)
-    return data, medians
 
-def train_model(X_train,y_train,X_test,y_test):
-    #train random forest regressor and xgboost regressor separately and compare them
+def candidate_models(random_state=42):
+    """Algorithms tested in the paper (plus XGBoost) with their hyper-parameter grids."""
+    imp = lambda: SimpleImputer(strategy='median')  # noqa: E731
+    scaled_y = lambda est: TransformedTargetRegressor(est, transformer=StandardScaler())  # noqa: E731
     models = {
-        'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42),
-        'XGBoost': xgb.XGBRegressor(n_estimators=100, random_state=42)
+        'Linear': (make_pipeline(imp(), StandardScaler(), LinearRegression()), {}),
+        'Polynomial': (make_pipeline(imp(), StandardScaler(), PolynomialFeatures(), Ridge()),
+                       {'polynomialfeatures__degree': [2, 3], 'ridge__alpha': [1, 10, 100]}),
+        'SVM': (make_pipeline(imp(), StandardScaler(), scaled_y(SVR())),
+                {'transformedtargetregressor__regressor__C': [1, 10, 100],
+                 'transformedtargetregressor__regressor__gamma': ['scale', 0.05]}),
+        'Random Forest': (make_pipeline(imp(), RandomForestRegressor(n_estimators=300, random_state=random_state,
+                                                                     n_jobs=-1)),
+                          {'randomforestregressor__min_samples_leaf': [1, 2, 5],
+                           'randomforestregressor__max_features': [1.0, 0.5]}),
+        'ANN': (make_pipeline(imp(), StandardScaler(),
+                              scaled_y(MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=3000,
+                                                    early_stopping=True, random_state=random_state))),
+                {'transformedtargetregressor__regressor__alpha': [1e-3, 1e-1, 1.0]}),
     }
-    predictions = {}
-    r2_scores = {}
-    for name, model in models.items():
-        model.fit(X_train, y_train)
-        y_pred = model.predict(X_test)
-        #evaluate the model
-        mse = mean_squared_error(y_test, y_pred)
-        r2 = r2_score(y_test, y_pred)
-        print(f"{name} - Mean Squared Error: {mse}")
-        print(f"{name} - R^2 Score: {r2}")
-        predictions[name] = y_pred
-        r2_scores[name] = r2
-    #scatter plot of actual vs predicted for both random forest and xgboost, R^2 in the title
-    fig, axes = plt.subplots(1, len(models), figsize=(14, 6), sharex=True, sharey=True)
-    lims = [min(y_test.min(), min(p.min() for p in predictions.values())),
-            max(y_test.max(), max(p.max() for p in predictions.values()))]
-    for ax, name in zip(axes, models):
-        ax.scatter(y_test, predictions[name], alpha=0.5, s=15)
-        ax.plot(lims, lims, 'r--', label='Perfect prediction')
-        ax.set_xlabel('Actual GROSS_FLUID')
-        ax.set_ylabel('Predicted GROSS_FLUID')
-        ax.set_title(f'{name} (R^2 = {r2_scores[name]:.3f})')
-        ax.legend()
-    plt.tight_layout()
-    plt.savefig("/home/rianr/pypro/myvenv/virtual-well-test/Images/r2_score.png")
-    plt.close()
-    #plot feature of importance as horizontal bars for the random forest regressor and xgboost regressor
-    rf_importances = models['Random Forest'].feature_importances_
-    xgb_importances = models['XGBoost'].feature_importances_
-    feature_names = X_train.columns
-    y_pos = np.arange(len(feature_names))
-    height = 0.4
-
-    plt.figure(figsize=(10, 6))
-    plt.barh(y_pos - height/2, rf_importances, height, label='Random Forest')
-    plt.barh(y_pos + height/2, xgb_importances, height, label='XGBoost')
-    plt.yticks(y_pos, feature_names)
-    plt.gca().invert_yaxis()
-    plt.xlabel('Importance')
-    plt.title('Feature Importances')
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig("/home/rianr/pypro/myvenv/virtual-well-test/Images/feature_importances.png")
-    plt.close()
-
-    return predictions, models
+    if xgb is not None:
+        models['XGBoost'] = (make_pipeline(imp(), xgb.XGBRegressor(n_estimators=300, random_state=random_state,
+                                                                   n_jobs=-1)),
+                             {'xgbregressor__max_depth': [3, 5],
+                              'xgbregressor__learning_rate': [0.03, 0.1]})
+    return models
 
 
-
-def main(file_path):
-    data = load_data(file_path)
-    #making all columns when printed
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.width', None)
-    pd.set_option('display.max_rows', None)
-    data.to_csv("/home/rianr/pypro/myvenv/virtual-well-test/data/processed_data.csv", index=False)
-    data = adding_columns(data)
-    print(data.head())
-    X_train, X_test, y_train, y_test = create_train_test_split(data)
-    train_data = pd.concat([X_train, y_train], axis=1)
-    test_data = pd.concat([X_test, y_test], axis=1)
-    analyze_data(train_data)
-    #clean the data
-    train_data, train_medians = data_cleaning(train_data)
-    print('===================================After Cleaning===================================')
-    analyze_data(train_data)
-    print('Length of train_data after cleaning: ', len(train_data))
-    # separate cleaned train data back into features and target
-    X_train = train_data.drop(columns=['GROSS_FLUID'])
-    y_train = train_data['GROSS_FLUID']
-    # cleaned test data
-    test_data = test_data.dropna()
-    X_test = test_data.drop(columns=['GROSS_FLUID'])
-    y_test = test_data['GROSS_FLUID']
-    # models can't use datetime columns, drop TEST_DATE from the features
-    #WATER_CUT and GAS_LIQUID_RATIO are computed from GROSS_FLUID (the target), drop them to avoid leakage
-    leak_cols = ['TEST_DATE', 'WATER_CUT', 'GAS_LIQUID_RATIO','FM_GAS']
-    to_drop = ['DURATION']
-    X_train = X_train.drop(columns=leak_cols + to_drop)
-    X_test = X_test.drop(columns=leak_cols + to_drop)
+def time_block_folds(train, cv=5):
+    """CV folds made of time blocks within each string: fold k holds the k-th chronological
+    fifth of every string's tests. Unlike shuffled k-fold, neighbouring tests of the same well
+    are not split across train/validation, so models that memorise wells are not rewarded."""
+    df = train.reset_index(drop=True)
+    order = df.sort_values(['STRING_CODE', 'TEST_DATE']).index
+    rank = df.loc[order].groupby('STRING_CODE').cumcount() / df.loc[order].groupby('STRING_CODE')[
+        'STRING_CODE'].transform('size')
+    block = np.empty(len(df), dtype=int)
+    block[order] = np.minimum((rank * cv).astype(int), cv - 1)
+    return [(np.flatnonzero(block != k), np.flatnonzero(block == k)) for k in range(cv)]
 
 
-    predictions, models = train_model(X_train, y_train, X_test, y_test)
+def compare_models(train, test, features=FEATURES, models=None, cv=5, random_state=42):
+    """Tune each algorithm with time-block CV on the training set and score it on the blind test.
+    Returns (results sorted by CV R2, fitted best estimators, best params)."""
+    models = candidate_models(random_state) if models is None else models
+    factor = equivalent_factor(test['GRAVITY'], test['WATER_CUT_FRAC']).to_numpy()
+    train = train.reset_index(drop=True)
+    folds = time_block_folds(train, cv)
+    rows, fitted, params = [], {}, {}
+    for name, (est, grid) in models.items():
+        search = GridSearchCV(est, grid or {}, cv=folds, scoring='r2', n_jobs=-1)
+        search.fit(train[features], train[TARGET])
+        fitted[name], params[name] = search.best_estimator_, search.best_params_
+        pred = search.best_estimator_.predict(test[features])
+        rows.append({'model': name, 'cv_R2': search.best_score_,
+                     **evaluate(test[TARGET].to_numpy(), pred, factor)})
+    results = pd.DataFrame(rows).set_index('model').sort_values('cv_R2', ascending=False)
+    return results, fitted, params
 
+
+def feature_importance(model, X, y, random_state=42):
+    """Permutation importance (works for every algorithm), normalised to sum to 1."""
+    imp = permutation_importance(model, X, y, n_repeats=10, random_state=random_state, n_jobs=-1)
+    vals = np.clip(imp.importances_mean, 0, None)
+    vals = vals / vals.sum() if vals.sum() > 0 else vals
+    return pd.Series(vals, index=X.columns).sort_values(ascending=False)
+
+
+def new_well_check(model, data, features=FEATURES, n_splits=5):
+    """Leave-wells-out CV R2: how the model does on wells it has never seen."""
+    n_splits = min(n_splits, data['WELL_NAME'].nunique())
+    return cross_val_score(model, data[features], data[TARGET], groups=data['WELL_NAME'],
+                           cv=GroupKFold(n_splits), scoring='r2')
+
+
+def save_plots(corr, importance, model, train, test, pred_test, grid, out_dir=IMAGES_DIR,
+               degree=POLY_DEGREE):
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(8, 7))
+    im = ax.imshow(corr.values, cmap='RdBu_r', vmin=-1, vmax=1)
+    ax.set_xticks(range(len(corr)), corr.columns, rotation=45, ha='right')
+    ax.set_yticks(range(len(corr)), corr.columns)
+    for i in range(len(corr)):
+        for j in range(len(corr)):
+            ax.text(j, i, f"{corr.iat[i, j]:.2f}", ha='center', va='center', fontsize=8)
+    fig.colorbar(im, ax=ax)
+    ax.set_title('Spearman correlation')
+    fig.tight_layout(); fig.savefig(out_dir / 'spearman_heatmap.png', dpi=120); plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    importance[::-1].plot.barh(ax=ax)
+    ax.set_xlabel('Normalised permutation importance'); ax.set_title('Feature importance')
+    fig.tight_layout(); fig.savefig(out_dir / 'feature_importance.png', dpi=120); plt.close(fig)
+
+    # Sensitivity on WHT at the median of the other features, extended past the training range.
+    base = train[FEATURES].median().to_frame().T
+    span = grid[-1] - grid[0]
+    wide = np.linspace(grid[0] - 0.2 * span, grid[-1] + 0.2 * span, 60)
+    raw = sensitivity_curves(model, base, wide)[0]
+    fitted = np.polyval(np.polyfit(grid, sensitivity_curves(model, base, grid)[0], degree), wide)
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(wide, raw, label='Model only')
+    ax.plot(wide, fitted, label=f'Combined (polynomial deg {degree})')
+    ax.axvspan(grid[0], grid[-1], alpha=0.1, label='Training range')
+    ax.set_xlabel('WH_TEMP (°F)'); ax.set_ylabel('QLIQ_EQ'); ax.set_title('WHT sensitivity'); ax.legend()
+    fig.tight_layout(); fig.savefig(out_dir / 'wht_sensitivity.png', dpi=120); plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.scatter(test[TARGET], pred_test, s=12, alpha=0.6)
+    lim = [0, max(test[TARGET].max(), pred_test.max()) * 1.05]
+    ax.plot(lim, lim, 'r--'); ax.set_xlim(lim); ax.set_ylim(lim)
+    ax.set_xlabel('Actual QLIQ_EQ'); ax.set_ylabel('Predicted QLIQ_EQ'); ax.set_title('Blind test')
+    fig.tight_layout(); fig.savefig(out_dir / 'actual_vs_predicted.png', dpi=120); plt.close(fig)
+
+
+def main(file_path=DATA_PATH, split='random', degree=POLY_DEGREE, make_plots=True, models=None,
+         out_dir=IMAGES_DIR):
+    data, clean = prepare_data(file_path)
+    print(f"Clean tests: {len(clean)} of {len(data)} ({clean['WELL_NAME'].nunique()} wells)")
+
+    corr = spearman_correlation(clean)
+    print("\nSpearman correlation with QLIQ_EQ:\n" + corr[TARGET].drop(TARGET).round(2).to_string())
+
+    train, test = split_data(clean, method=split)
+    print(f"\nSplit ({split}): train {len(train)}, test {len(test)}")
+    results, fitted, params = compare_models(train, test, models=models)
+
+    best_name = results.index[0]
+    best = fitted[best_name]
+    grid = sweep_grid(train[SWEEP_FEATURE])
+    factor = equivalent_factor(test['GRAVITY'], test['WATER_CUT_FRAC']).to_numpy()
+    combined = evaluate(test[TARGET].to_numpy(), combined_predict(best, test[FEATURES], grid, degree), factor)
+    results.loc[f'{best_name} + polynomial', list(combined)] = list(combined.values())
+    print("\nModel comparison (cv_R2 = time-block CV on train; others on test set):")
+    print(results.round(3).to_string())
+    print(f"\nSelected: {best_name}  params: {params[best_name]}")
+    if 'Random Forest' in params:
+        print(f"Random Forest params (for training01.RF_PARAMS): {params['Random Forest']}")
+
+    importance = feature_importance(best, test[FEATURES], test[TARGET])
+    print("\nFeature importance:\n" + importance.round(3).to_string())
+
+    new_well = new_well_check(best, clean)
+    print(f"\nLeave-wells-out R2 (unseen wells): mean {new_well.mean():.2f}, per fold {np.round(new_well, 2)}")
+
+    if make_plots:
+        save_plots(corr, importance, best, train, test, best.predict(test[FEATURES]), grid,
+                   out_dir=out_dir, degree=degree)
+    return results, fitted, params
 
 
 if __name__ == "__main__":
-    main("/home/rianr/pypro/myvenv/virtual-well-test/data/welltest.csv")
+    main()
